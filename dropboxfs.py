@@ -214,9 +214,9 @@ class DropboxClient(client.DropboxClient):
     # metadata() and children(). This allows for more fine-grained fetches
     # and caching.
 
-    def metadata(self, path):
+    def metadata(self, path, cache_read=True):
         "Gets metadata for a given path."
-        item = self.cache.get(path)
+        item = self.cache.get(path) if cache_read else None
         if not item or item.metadata is None or item.expired:
             try:
                 metadata = super(DropboxClient, self).metadata(path,
@@ -455,9 +455,9 @@ class DropboxFS(FS):
         return self._listdir_helper(path, children, wildcard, full, absolute, dirs_only, files_only)
 
     @synchronize
-    def getinfo(self, path):
+    def getinfo(self, path, cache_read=True):
         path = abspath(normpath(path))
-        metadata = self.client.metadata(path)
+        metadata = self.client.metadata(path, cache_read=cache_read)
         return metadata_to_info(metadata, localtime=self.localtime)
 
     def copy(self, src, dst, *args, **kwargs):
