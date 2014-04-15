@@ -4,7 +4,7 @@ import os
 from distutils.core import setup
 
 name = 'dropboxfs'
-version = '0.3.3'
+version = '0.4.0'
 release = '0'
 versrel = version + '-' + release
 readme = os.path.join(os.path.dirname(__file__), 'README.rst')
