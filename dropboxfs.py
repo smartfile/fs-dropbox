@@ -7,13 +7,11 @@ A FS object that integrates with Dropbox.
 """
 
 import time
-import stat
 import shutil
 import optparse
 import datetime
 import tempfile
 import calendar
-import os.path
 from UserDict import UserDict
 
 from fs.base import *
@@ -321,7 +319,7 @@ class DropboxClient(client.DropboxClient):
 
     def put_file(self, path, f, overwrite=False):
         try:
-            metadata = super(DropboxClient, self).put_file(path, f, overwrite=overwrite)
+            super(DropboxClient, self).put_file(path, f, overwrite=overwrite)
         except rest.ErrorResponse, e:
             raise RemoteConnectionError(opname='put_file', path=path,
                                         details=e)
