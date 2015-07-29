@@ -12,7 +12,6 @@ import optparse
 import datetime
 import tempfile
 import calendar
-import os.path
 from UserDict import UserDict
 
 from fs.base import *

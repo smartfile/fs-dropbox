@@ -4,7 +4,7 @@ import os
 from distutils.core import setup
 
 name = 'dropboxfs'
-version = '0.4.0'
+version = '0.4.1'
 release = '0'
 versrel = version + '-' + release
 readme = os.path.join(os.path.dirname(__file__), 'README.rst')
@@ -19,11 +19,11 @@ setup(
         'fs',
         'dropbox',
     ],
-    author='Ben Timby',
-    author_email='btimby@gmail.com',
-    maintainer='Ben Timby',
-    maintainer_email='btimby@gmail.com',
-    url='http://github.com/btimby/fs-dropbox/',
+    author='SmartFile',
+    author_email='tcunningham@smartfile.com',
+    maintainer='Travis Cunningham',
+    maintainer_email='tcunningham@smartfile.com',
+    url='http://github.com/smartfile/fs-dropbox/',
     license='GPLv3',
     py_modules=['dropboxfs'],
     package_data={'': ['README.rst']},
