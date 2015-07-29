@@ -7,7 +7,6 @@ A FS object that integrates with Dropbox.
 """
 
 import time
-import stat
 import shutil
 import optparse
 import datetime
@@ -31,7 +30,7 @@ CACHE_TTL = 300
 # The format Dropbox uses for times.
 TIME_FORMAT = '%a, %d %b %Y %H:%M:%S +0000'
 # Max size for spooling to memory before using disk (5M).
-MAX_BUFFER = 1024**2*5
+MAX_BUFFER = 1024 ** 2 * 5
 
 
 class ContextManagerStream(object):
@@ -56,9 +55,9 @@ class ContextManagerStream(object):
         self.close()
 
 
-# TODO: these classes can probably be replaced with tempfile.SpooledTemporaryFile, however
-# I am unsure at this moment if doing so would be bad since it is only available in Python
-# 2.6+.
+# TODO: these classes can probably be replaced with
+# tempfile.SpooledTemporaryFile, however I am unsure at this moment if doing
+# so would be bad since it is only available in Python 2.6+.
 
 class SpooledWriter(ContextManagerStream):
     """Spools bytes to a StringIO buffer until it reaches max_buffer. At that
@@ -68,14 +67,15 @@ class SpooledWriter(ContextManagerStream):
         self.max_buffer = max_buffer
         self.bytes = 0
         super(SpooledWriter, self).__init__(StringIO(), name)
-    
+
     def __len__(self):
         return self.bytes
 
     def write(self, data):
         if self.temp.tell() + len(data) >= self.max_buffer:
-            # We reached the max_buffer size that we want to keep in memory. Switch
-            # to an on-disk temp file. Copy what has been written so far to it.
+            # We reached the max_buffer size that we want to keep in memory.
+            # Switch to an on-disk temp file. Copy what has been written so
+            # far to it.
             temp = tempfile.TemporaryFile()
             self.temp.seek(0)
             shutil.copyfileobj(self.temp, temp)
@@ -93,8 +93,11 @@ class SpooledWriter(ContextManagerStream):
 
 
 class SpooledReader(ContextManagerStream):
-    """Reads the entire file from the remote server into a buffer or temporary file.
-    It can then satisfy read(), seek() and other calls using the local file."""
+    """
+    Reads the entire file from the remote server into a buffer or temporary
+    file. It can then satisfy read(), seek() and other calls using the local
+    file.
+    """
     def __init__(self, client, name, max_buffer=MAX_BUFFER):
         self.client = client
         r = self.client.get_file(name)
@@ -282,8 +285,8 @@ class DropboxClient(client.DropboxClient):
         item = self.cache.get(path) if cache_read else None
         if not item or item.metadata is None or item.expired:
             try:
-                metadata = super(DropboxClient, self).metadata(path,
-                    include_deleted=False, list=False)
+                metadata = super(DropboxClient, self).metadata(
+                    path, include_deleted=False, list=False)
             except rest.ErrorResponse, e:
                 if e.status == 404:
                     raise ResourceNotFoundError(path)
@@ -313,8 +316,8 @@ class DropboxClient(client.DropboxClient):
             update = True
         if update:
             try:
-                metadata = super(DropboxClient, self).metadata(path, hash=hash,
-                    include_deleted=False, list=True)
+                metadata = super(DropboxClient, self).metadata(
+                    path, hash=hash, include_deleted=False, list=True)
                 children = []
                 contents = metadata.pop('contents')
                 for child in contents:
@@ -384,7 +387,7 @@ class DropboxClient(client.DropboxClient):
 
     def put_file(self, path, f, overwrite=False):
         try:
-            metadata = super(DropboxClient, self).put_file(path, f, overwrite=overwrite)
+            super(DropboxClient, self).put_file(path, f, overwrite=overwrite)
         except rest.ErrorResponse, e:
             raise RemoteConnectionError(opname='put_file', path=path,
                                         details=e)
@@ -408,7 +411,7 @@ def metadata_to_info(metadata, localtime=False):
     try:
         if 'client_mtime' in metadata:
             mtime = metadata.get('client_mtime')
-        else:    
+        else:
             mtime = metadata.get('modified')
         if mtime:
             # Parse date/time from Dropbox as struct_time.
@@ -428,17 +431,16 @@ def metadata_to_info(metadata, localtime=False):
 class DropboxFS(FS):
     """A FileSystem that stores data in Dropbox."""
 
-    _meta = { 'thread_safe' : True,
-              'virtual' : False,
-              'read_only' : False,
-              'unicode_paths' : True,
-              'case_insensitive_paths' : True,
-              'network' : True,
-              'atomic.setcontents' : False,
-              'atomic.makedir': True,
-              'atomic.rename': True,
-              'mime_type': 'virtual/dropbox',
-             }
+    _meta = {'thread_safe': True,
+             'virtual': False,
+             'read_only': False,
+             'unicode_paths': True,
+             'case_insensitive_paths': True,
+             'network': True,
+             'atomic.setcontents': False,
+             'atomic.makedir': True,
+             'atomic.rename': True,
+             'mime_type': 'virtual/dropbox', }
 
     def __init__(self, app_key, app_secret, access_type, token_key,
                  token_secret, localtime=False, thread_synchronize=True):
@@ -452,7 +454,8 @@ class DropboxFS(FS):
         :param thread_synchronize: set to True (default) to enable thread-safety
         """
         super(DropboxFS, self).__init__(thread_synchronize=thread_synchronize)
-        self.client = create_client(app_key, app_secret, access_type, token_key, token_secret)
+        self.client = create_client(app_key, app_secret, access_type,
+                                    token_key, token_secret)
         self.localtime = localtime
 
     def __str__(self):
@@ -512,10 +515,12 @@ class DropboxFS(FS):
         except ResourceNotFoundError:
             return False
 
-    def listdir(self, path="/", wildcard=None, full=False, absolute=False, dirs_only=False, files_only=False):
+    def listdir(self, path="/", wildcard=None, full=False, absolute=False,
+                dirs_only=False, files_only=False):
         path = abspath(normpath(path))
         children = self.client.children(path)
-        return self._listdir_helper(path, children, wildcard, full, absolute, dirs_only, files_only)
+        return self._listdir_helper(path, children, wildcard, full, absolute,
+                                    dirs_only, files_only)
 
     @synchronize
     def getinfo(self, path, cache_read=True):
@@ -567,12 +572,30 @@ class DropboxFS(FS):
 
 
 def main():
-    parser = optparse.OptionParser(prog="dropboxfs", description="CLI harness for DropboxFS.")
-    parser.add_option("-k", "--app-key", help="Your Dropbox app key.")
-    parser.add_option("-s", "--app-secret", help="Your Dropbox app secret.")
-    parser.add_option("-t", "--type", default='dropbox', choices=('dropbox', 'app_folder'), help="Your Dropbox app access type.")
-    parser.add_option("-a", "--token-key", help="Your access token key (if you previously obtained one.")
-    parser.add_option("-b", "--token-secret", help="Your access token secret (if you previously obtained one.")
+    parser = optparse.OptionParser(prog="dropboxfs",
+                                   description="CLI harness for DropboxFS.")
+    parser.add_option(
+        "-k",
+        "--app-key",
+        help="Your Dropbox app key.")
+    parser.add_option(
+        "-s",
+        "--app-secret",
+        help="Your Dropbox app secret.")
+    parser.add_option(
+        "-t",
+        "--type",
+        default='dropbox',
+        choices=('dropbox', 'app_folder'),
+        help="Your Dropbox app access type.")
+    parser.add_option(
+        "-a",
+        "--token-key",
+        help="Your access token key (if you previously obtained one.")
+    parser.add_option(
+        "-b",
+        "--token-secret",
+        help="Your access token secret (if you previously obtained one.")
 
     (options, args) = parser.parse_args()
 
@@ -582,7 +605,8 @@ def main():
 
     # Instantiate a client one way or another.
     if not options.token_key and not options.token_secret:
-        s = session.DropboxSession(options.app_key, options.app_secret, options.type)
+        s = session.DropboxSession(options.app_key, options.app_secret,
+                                   options.type)
         # Get a temporary token, so we can make oAuth calls.
         t = s.obtain_request_token()
         print "Please visit the following URL and authorize this application.\n"
@@ -600,11 +624,13 @@ def main():
         print "\nWhen you are done, please press <enter>."
         raw_input()
     elif not options.token_key or not options.token_secret:
-        parser.error('You must provide both the access token and the access token secret.')
+        parser.error('You must provide both the access token and the '
+                     'access token secret.')
     else:
         token_key, token_secret = options.token_key, options.token_secret
 
-    fs = DropboxFS(options.app_key, options.app_secret, options.type, token_key, token_secret)
+    fs = DropboxFS(options.app_key, options.app_secret, options.type,
+                   token_key, token_secret)
 
     print fs.getinfo('/')
     print fs.getinfo('/Public')
@@ -618,7 +644,7 @@ def main():
     filelike = fs.open('/big-file.pdf')
     print filelike.read(100)
     filelike.seek(100)
-    chunk2 =  filelike.read(100)
+    chunk2 = filelike.read(100)
     print chunk2
     filelike.seek(200)
     print filelike.read(100)
@@ -629,4 +655,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
