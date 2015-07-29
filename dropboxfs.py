@@ -125,6 +125,8 @@ class ChunkedReader(ContextManagerStream):
         self.bytes = int(self.r.getheader('Content-Length'))
         self.name = name
         self.closed = False
+        self.pos = 0
+        self.seek_pos = 0
 
     def __len__(self):
         return self.bytes
@@ -132,23 +134,80 @@ class ChunkedReader(ContextManagerStream):
     def __iter__(self):
         return self
 
+    def seek(self, offset, whence=0):
+        """
+        Change the stream position to the given byte offset in the file-like
+        object.
+        """
+        if (whence == 0):
+            self.seek_pos = offset
+        elif (whence == 1):
+            self.seek_pos += offset
+        elif (whence == 2):
+            self.seek_pos = self.size + offset
+
+    def tell(self):
+        """ Return the current stream position. """
+        return self.seek_pos
+
     def next(self):
+        """
+        Read the data until all data is read.
+        data is empty string when there is no more data to read.
+        """
         data = self.read()
         if data is None:
             raise StopIteration()
         return data
 
-    def read(self, size=16384):
+    def read(self, amt=None):
+        """ Read a piece of the file from dropbox. """
         if not self.r.isclosed():
-            return self.r.read(size)
+            # Do some fake seeking
+            if self.seek_pos < self.pos:
+                self.r.close()
+                self.r = self.client.get_file(self.name)
+                self.r.read(self.seek_pos)
+            elif self.seek_pos > self.pos:
+                # Read ahead enough to reconcile pos and seek_pos
+                self.r.read(self.pos - self.seek_pos)
+                self.pos = self.seek_pos
+
+            # Update position pointers
+            if amt:
+                self.pos += amt
+                self.seek_pos += amt
+            return self.r.read(amt)
+
         else:
             self.close()
 
-    def readline(self):
+    def readline(self, size=-1):
+        """ Not implemented. Read and return one line from the stream. """
         raise NotImplementedError()
-    
+
+    def readlines(self, hint=-1):
+        """
+        Not implemented. Read and return a list of lines from the stream.
+        """
+        raise NotImplementedError()
+
+    def writable(self):
+        """ The stream does not support writing. """
+        return False
+
+    def writelines(self, lines):
+        """ Not implemented. Write a list of lines to the stream. """
+        raise NotImplementedError()
+
     def close(self):
+        """
+        Flush and close this stream. This method has no effect if the file
+        is already closed. As a convenience, it is allowed to call this method
+        more than once; only the first call, however, will have an effect.
+        """
         if not self.closed:
+            self.r.close()
             self.closed = True
 
 
@@ -551,6 +610,18 @@ def main():
     fs.makedir('/Bar')
     print fs.listdir('/')
     print fs.listdir('/Foo')
+
+    filelike = fs.open('/big-file.pdf')
+    print filelike.read(100)
+    filelike.seek(100)
+    chunk2 =  filelike.read(100)
+    print chunk2
+    filelike.seek(200)
+    print filelike.read(100)
+    filelike.seek(100)
+    chunk2a = filelike.read(100)
+    print chunk2a
+    assert chunk2 == chunk2a
 
 if __name__ == '__main__':
     main()
