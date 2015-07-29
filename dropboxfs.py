@@ -171,14 +171,16 @@ class ChunkedReader(ContextManagerStream):
             elif self.seek_pos > self.pos:
                 # Read ahead enough to reconcile pos and seek_pos
                 self.r.read(self.pos - self.seek_pos)
-                self.pos = self.seek_pos
+            self.pos = self.seek_pos
 
             # Update position pointers
             if amt:
                 self.pos += amt
                 self.seek_pos += amt
+            else:
+                self.pos = self.bytes
+                self.seek_pos = self.bytes
             return self.r.read(amt)
-
         else:
             self.close()
 
@@ -206,8 +208,10 @@ class ChunkedReader(ContextManagerStream):
         is already closed. As a convenience, it is allowed to call this method
         more than once; only the first call, however, will have an effect.
         """
-        if not self.closed:
+        # It's a memory leak if self.r not closed.
+        if not self.r.isclosed():
             self.r.close()
+        if not self.closed:
             self.closed = True
 
 
