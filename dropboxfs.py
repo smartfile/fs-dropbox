@@ -12,6 +12,7 @@ import optparse
 import datetime
 import tempfile
 import calendar
+import logging
 from UserDict import UserDict
 
 from fs.base import *
@@ -23,6 +24,8 @@ from dropbox import rest
 from dropbox import client
 from dropbox import session
 
+
+LOGGER = logging.getLogger(__name__)
 
 # Items in cache are considered expired after 5 minutes.
 CACHE_TTL = 300
@@ -122,6 +125,7 @@ class ChunkedReader(ContextManagerStream):
         try:
             self.r = self.client.get_file(name)
         except rest.ErrorResponse, e:
+            LOGGER.error(e, exc_info=True, extra={'stack': True,})
             raise RemoteConnectionError(opname='get_file', path=name,
                                         details=e)
         self.bytes = int(self.r.getheader('Content-Length'))
@@ -289,6 +293,7 @@ class DropboxClient(client.DropboxClient):
             except rest.ErrorResponse, e:
                 if e.status == 404:
                     raise ResourceNotFoundError(path)
+                LOGGER.error(e, exc_info=True, extra={'stack': True,})
                 raise RemoteConnectionError(opname='metadata', path=path,
                                             details=e)
             if metadata.get('is_deleted', False):
@@ -327,6 +332,7 @@ class DropboxClient(client.DropboxClient):
                 item = self.cache[path] = CacheItem(metadata, children)
             except rest.ErrorResponse, e:
                 if not item or e.status != 304:
+                    LOGGER.error(e, exc_info=True, extra={'stack': True,})
                     raise RemoteConnectionError(opname='metadata', path=path,
                                                 details=e)
                 # We have an item from cache (perhaps expired), but it's
@@ -344,6 +350,7 @@ class DropboxClient(client.DropboxClient):
                 raise ParentDirectoryMissingError(path)
             if e.status == 403:
                 raise DestinationExistsError(path)
+            LOGGER.error(e, exc_info=True, extra={'stack': True,})
             raise RemoteConnectionError(opname='file_create_folder', path=path,
                                         details=e)
         self.cache.set(path, metadata)
@@ -356,6 +363,7 @@ class DropboxClient(client.DropboxClient):
                 raise ResourceNotFoundError(src)
             if e.status == 403:
                 raise DestinationExistsError(dst)
+            LOGGER.error(e, exc_info=True, extra={'stack': True,})
             raise RemoteConnectionError(opname='file_copy', path=path,
                                         details=e)
         self.cache.set(dst, metadata)
@@ -368,6 +376,7 @@ class DropboxClient(client.DropboxClient):
                 raise ResourceNotFoundError(src)
             if e.status == 403:
                 raise DestinationExistsError(dst)
+            LOGGER.error(e, exc_info=True, extra={'stack': True,})
             raise RemoteConnectionError(opname='file_move', path=path,
                                         details=e)
         self.cache.pop(src, None)
@@ -388,6 +397,7 @@ class DropboxClient(client.DropboxClient):
         try:
             super(DropboxClient, self).put_file(path, f, overwrite=overwrite)
         except rest.ErrorResponse, e:
+            LOGGER.error(e, exc_info=True, extra={'stack': True,})
             raise RemoteConnectionError(opname='put_file', path=path,
                                         details=e)
         self.cache.pop(dirname(path), None)
