@@ -133,6 +133,7 @@ class ChunkedReader(ContextManagerStream):
         self.closed = False
         self.pos = 0
         self.seek_pos = 0
+        super(ChunkedReader, self).__init__(self.r, name)
 
     def __len__(self):
         return self.bytes
