@@ -116,112 +116,6 @@ class SpooledReader(ContextManagerStream):
         return self.bytes
 
 
-class ChunkedReader(ContextManagerStream):
-    """ A file-like that provides access to a file with dropbox API"""
-    """Reads the file from the remote server as requested.
-    It can then satisfy read()."""
-    def __init__(self, client, name):
-        self.client = client
-        try:
-            self.r = self.client.get_file(name)
-        except rest.ErrorResponse, e:
-            LOGGER.error(e, exc_info=True, extra={'stack': True,})
-            raise RemoteConnectionError(opname='get_file', path=name,
-                                        details=e)
-        self.bytes = int(self.r.getheader('Content-Length'))
-        self.name = name
-        self.closed = False
-        self.pos = 0
-        self.seek_pos = 0
-        super(ChunkedReader, self).__init__(self.r, name)
-
-    def __len__(self):
-        return self.bytes
-
-    def __iter__(self):
-        return self
-
-    def seek(self, offset, whence=0):
-        """
-        Change the stream position to the given byte offset in the file-like
-        object.
-        """
-        if (whence == 0):
-            self.seek_pos = offset
-        elif (whence == 1):
-            self.seek_pos += offset
-        elif (whence == 2):
-            self.seek_pos = self.size + offset
-
-    def tell(self):
-        """ Return the current stream position. """
-        return self.seek_pos
-
-    def next(self):
-        """
-        Read the data until all data is read.
-        data is empty string when there is no more data to read.
-        """
-        data = self.read()
-        if data is None:
-            raise StopIteration()
-        return data
-
-    def read(self, amt=None):
-        """ Read a piece of the file from dropbox. """
-        if not self.r.isclosed():
-            # Do some fake seeking
-            if self.seek_pos < self.pos:
-                self.r.close()
-                self.r = self.client.get_file(self.name)
-                self.r.read(self.seek_pos)
-            elif self.seek_pos > self.pos:
-                # Read ahead enough to reconcile pos and seek_pos
-                self.r.read(self.pos - self.seek_pos)
-            self.pos = self.seek_pos
-
-            # Update position pointers
-            if amt:
-                self.pos += amt
-                self.seek_pos += amt
-            else:
-                self.pos = self.bytes
-                self.seek_pos = self.bytes
-            return self.r.read(amt)
-        else:
-            self.close()
-
-    def readline(self, size=-1):
-        """ Not implemented. Read and return one line from the stream. """
-        raise NotImplementedError()
-
-    def readlines(self, hint=-1):
-        """
-        Not implemented. Read and return a list of lines from the stream.
-        """
-        raise NotImplementedError()
-
-    def writable(self):
-        """ The stream does not support writing. """
-        return False
-
-    def writelines(self, lines):
-        """ Not implemented. Write a list of lines to the stream. """
-        raise NotImplementedError()
-
-    def close(self):
-        """
-        Flush and close this stream. This method has no effect if the file
-        is already closed. As a convenience, it is allowed to call this method
-        more than once; only the first call, however, will have an effect.
-        """
-        # It's a memory leak if self.r not closed.
-        if not self.r.isclosed():
-            self.r.close()
-        if not self.closed:
-            self.closed = True
-
-
 class CacheItem(object):
     """Represents a path in the cache. There are two components to a path.
     It's individual metadata, and the children contained within it."""
@@ -482,7 +376,7 @@ class DropboxFS(FS):
     @synchronize
     def open(self, path, mode="rb", **kwargs):
         if 'r' in mode:
-            return ChunkedReader(self.client, path)
+            return self.client.get_file(path)
         else:
             return SpooledWriter(self.client, path)
 
