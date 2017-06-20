@@ -1,0 +1,14 @@
+# Python
+*.py[cod]
+__pycache__
+.cache
+
+# Virtual Enviroments
+venv
+
+# Coverage
+htmlcov/
+.coverage
+
+# Editor
+*.swp
