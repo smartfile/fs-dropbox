@@ -9,9 +9,7 @@ A FS object that integrates with Dropbox.
 import time
 import shutil
 import optparse
-import datetime
 import tempfile
-import calendar
 import logging
 import copy
 from UserDict import UserDict
@@ -32,8 +30,6 @@ LOGGER = logging.getLogger(__name__)
 
 # Items in cache are considered expired after 5 minutes.
 CACHE_TTL = 300
-# The format Dropbox uses for times.
-TIME_FORMAT = '%a, %d %b %Y %H:%M:%S +0000'
 # Max size for spooling to memory before using disk (5M).
 MAX_BUFFER = 1024 ** 2 * 5
 
@@ -42,13 +38,6 @@ class ContextManagerStream(object):
     def __init__(self, temp, name):
         self.temp = temp
         self.name = name
-
-    def __iter__(self):
-        while True:
-            data = self.read(16384)
-            if not data:
-                break
-            yield data
 
     def __getattr__(self, name):
         return getattr(self.temp, name)
@@ -95,28 +84,6 @@ class SpooledWriter(ContextManagerStream):
         self.temp.seek(0)
         self.client.files_upload(self, self.name, mode=WriteMode.overwrite)
         self.temp.close()
-
-
-class SpooledReader(ContextManagerStream):
-    """
-    Reads the entire file from the remote server into a buffer or temporary
-    file. It can then satisfy read(), seek() and other calls using the local
-    file.
-    """
-    def __init__(self, client, name, max_buffer=MAX_BUFFER):
-        self.client = client
-        r = self.client.files_download(name)
-        self.bytes = int(r.getheader('Content-Length'))
-        if r > max_buffer:
-            temp = tempfile.TemporaryFile()
-        else:
-            temp = StringIO()
-        shutil.copyfileobj(r, temp)
-        temp.seek(0)
-        super(SpooledReader, self).__init__(temp, name)
-
-    def __len__(self):
-        return self.bytes
 
 
 class ChunkedReader(ContextManagerStream):
@@ -330,6 +297,8 @@ class DropboxClient(Dropbox):
                 else:
                     metadata = super(DropboxClient, self).files_get_metadata(
                         path, include_deleted=False)
+                if not isinstance(metadata, FolderMetadata):
+                    raise ResourceInvalidError(path)
                 # Specify the root folder as an empty string rather than as "/"
                 folder_list = super(DropboxClient, self).files_list_folder(
                     path if path is not '/' else '', include_deleted=False)
@@ -343,11 +312,8 @@ class DropboxClient(Dropbox):
             except ApiError, e:
                 LOGGER.error(e, exc_info=True, extra={'stack': True,})
                 raise RemoteConnectionError(opname='metadata', path=path,
-                                                details=e)
-                # We have an item from cache (perhaps expired), but it's
-                # hash is still valid (as far as Dropbox is concerned),
-                # so just renew it and keep using it.
-                item.renew()
+                                            details=e)
+
         return item.children
 
     def files_create_folder(self, path):
@@ -371,7 +337,7 @@ class DropboxClient(Dropbox):
             if e.error.is_to() and e.error.get_to().is_conflict():
                 raise DestinationExistsError(dst)
             LOGGER.error(e, exc_info=True, extra={'stack': True,})
-            raise RemoteConnectionError(opname='file_copy', path=path,
+            raise RemoteConnectionError(opname='file_copy', path=src,
                                         details=e)
         self.cache.set(dst, metadata)
 
@@ -384,7 +350,7 @@ class DropboxClient(Dropbox):
             if e.error.is_to() and e.error.get_to().is_conflict():
                 raise DestinationExistsError(dst)
             LOGGER.error(e, exc_info=True, extra={'stack': True,})
-            raise RemoteConnectionError(opname='file_move', path=path,
+            raise RemoteConnectionError(opname='file_move', path=src,
                                         details=e)
         self.cache.pop(src, None)
         self.cache.set(dst, metadata)
@@ -420,7 +386,8 @@ def metadata_to_info(metadata, localtime=False):
         'size': getattr(metadata, 'size', 0),
         'isdir': isdir,
         'isfile': not isdir,
-        'modified_time': getattr(metadata, 'server_modified', None)
+        'modified_time': getattr(metadata, 'server_modified', None),
+        'path': metadata.name,
     }
     return info
 
@@ -454,11 +421,6 @@ class DropboxFS(FS):
 
     def __unicode__(self):
         return u"<DropboxFS: >"
-
-    def getmeta(self, meta_name, default=NoDefaultMeta):
-        if meta_name == 'read_only':
-            return self.read_only
-        return super(DropboxFS, self).getmeta(meta_name, default)
 
     @synchronize
     def open(self, path, mode="rb", **kwargs):
@@ -557,7 +519,7 @@ class DropboxFS(FS):
         self.client.files_delete(path)
 
 
-def main():
+def main():  # pragma: no cover
     parser = optparse.OptionParser(prog="dropboxfs",
                                    description="CLI harness for DropboxFS.")
     parser.add_option(
@@ -633,5 +595,5 @@ def main():
     assert chunk2 == chunk2a
     filelike.close()
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma: no cover
     main()
