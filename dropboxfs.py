@@ -261,7 +261,7 @@ class DropboxClient(Dropbox):
         item = self.cache.get(path) if cache_read else None
         if not item or item.metadata is None or item.expired:
             try:
-                if path is '/':
+                if path is '/' or path is '':
                     metadata = FolderMetadata(name='/', path_display='/')
                 else:
                     metadata = super(DropboxClient, self).files_get_metadata(
@@ -295,7 +295,7 @@ class DropboxClient(Dropbox):
         if update:
             try:
                 # The root folder is unsupported in metadata call
-                if path is '/':
+                if path is '/' or path is '':
                     metadata = FolderMetadata(name='/', path_display='/')
                 else:
                     metadata = super(DropboxClient, self).files_get_metadata(
