@@ -261,8 +261,11 @@ class DropboxClient(Dropbox):
         item = self.cache.get(path) if cache_read else None
         if not item or item.metadata is None or item.expired:
             try:
-                metadata = super(DropboxClient, self).files_get_metadata(
-                    path, include_deleted=False)
+                if path is '/':
+                    metadata = FolderMetadata(name='/', path_display='/')
+                else:
+                    metadata = super(DropboxClient, self).files_get_metadata(
+                        path, include_deleted=False)
             except ApiError, e:
                 if e.error.is_path() and e.error.get_path().is_not_found():
                     raise ResourceNotFoundError(path)

@@ -558,12 +558,14 @@ class TestDropboxFS(unittest.TestCase):
         self.assertIn('isfile', info)
         self.assertIn('modified_time', info)
         self.assertIn('size', info)
+        self.assertIn('path', info)
         self.assertFalse(info['isdir'])
         self.assertTrue(info['isfile'])
         self.assertEqual(
             datetime.datetime(2017, 6, 19, 16, 24, 12),
             info['modified_time'])
         self.assertEqual(957694, info['size'])
+        self.assertEqual('big-file.pdf', info['path'])
 
     @patch.object(dropbox.Dropbox, 'files_get_metadata')
     def test_info_file_deleted(self, mock_metadata):
@@ -602,10 +604,30 @@ class TestDropboxFS(unittest.TestCase):
         self.assertIn('isfile', info)
         self.assertIn('modified_time', info)
         self.assertIn('size', info)
+        self.assertIn('path', info)
         self.assertTrue(info['isdir'])
         self.assertFalse(info['isfile'])
         self.assertIsNone(info['modified_time'])
         self.assertEqual(0, info['size'])
+        self.assertEqual('files', info['path'])
+
+    def test_info_root(self):
+        """Test getting info for root directory."""
+        try:
+            info = self.fs.getinfo('/')
+        except Exception, e:
+            self.fail(e)
+
+        self.assertIn('isdir', info)
+        self.assertIn('isfile', info)
+        self.assertIn('modified_time', info)
+        self.assertIn('size', info)
+        self.assertIn('path', info)
+        self.assertTrue(info['isdir'])
+        self.assertFalse(info['isfile'])
+        self.assertIsNone(info['modified_time'])
+        self.assertEqual(0, info['size'])
+        self.assertEqual('/', info['path'])
 
     @patch.object(dropbox.Dropbox, 'files_get_metadata')
     def test_info_folder_does_not_exist(self, mock_metadata):
