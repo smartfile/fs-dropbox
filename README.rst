@@ -1,3 +1,6 @@
+.. image:: https://travis-ci.org/smartfile/fs-dropbox.svg?branch=master
+    :target: https://travis-ci.org/smartfile/fs-dropbox
+
 fs-dropbox
 ----------
 
