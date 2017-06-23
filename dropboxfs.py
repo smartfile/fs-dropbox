@@ -266,7 +266,7 @@ class DropboxClient(Dropbox):
                     path, include_deleted=False)
             except BadInputError, e:
                 # Root folder is unsupported
-                if 'The root folder is unsupported' in e:
+                if 'The root folder is unsupported' in e.message:
                     metadata = FolderMetadata(name='/', path_display='/')
                 else:
                     raise
@@ -302,7 +302,7 @@ class DropboxClient(Dropbox):
                     path, include_deleted=False)
             except BadInputError, e:
                 # Root folder is unsupported
-                if 'The root folder is unsupported' in e:
+                if 'The root folder is unsupported' in e.message:
                     metadata = FolderMetadata(name='/', path_display='/')
                 else:
                     raise
