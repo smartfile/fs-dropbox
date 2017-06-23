@@ -20,6 +20,7 @@ from dropbox.files import (
     FileMetadata,
     FolderMetadata,
     GetMetadataError,
+    ListFolderError,
     ListFolderResult,
     LookupError,
     RelocationError,
@@ -474,14 +475,17 @@ class TestDropboxFS(unittest.TestCase):
         self.assertEqual(4, mock_list.call_count)
         self.assertEqual(1, len(children))
 
+    @patch.object(dropbox.Dropbox, 'files_get_metadata')
     @patch.object(dropbox.Dropbox, 'files_list_folder')
-    def test_listdir_root(self, mock_list):
+    def test_listdir_root(self, mock_list, mock_metadata):
         """Test listing the root directory."""
         entries = [
             Mock(spec=FileMetadata),
             Mock(spec=FolderMetadata),
         ]
         mock_list.return_value = ListFolderResult(entries=entries)
+        mock_metadata.side_effect = dropbox.exceptions.BadInputError(
+            1, 'The root folder is unsupported')
 
         children = self.fs.listdir('/')
 
@@ -518,12 +522,33 @@ class TestDropboxFS(unittest.TestCase):
             self.fs.listdir('big-file.pdf')
 
     @patch.object(dropbox.Dropbox, 'files_get_metadata')
+    def test_listdir_bad_input(self, mock_metadata):
+        """Test listing a directory with bad input."""
+        mock_metadata.side_effect = dropbox.exceptions.BadInputError(
+            1, 'Bad path')
+
+        with self.assertRaises(dropbox.exceptions.BadInputError) as e:
+            self.fs.listdir('/files')
+
+    @patch.object(dropbox.Dropbox, 'files_get_metadata')
     def test_listdir_error(self, mock_metadata):
         """Test listing a directory with an error."""
         lookup_error = LookupError(tag='not_found')
         metadata_error = GetMetadataError(tag='path', value=lookup_error)
         mock_metadata.side_effect = dropbox.exceptions.ApiError(
             '1', metadata_error, 'message', '')
+
+        with self.assertRaises(RemoteConnectionError) as e:
+            self.fs.listdir('/files')
+
+    @patch.object(dropbox.Dropbox, 'files_get_metadata')
+    @patch.object(dropbox.Dropbox, 'files_list_folder')
+    def test_listdir_error_listing(self, mock_list, mock_metadata):
+        """Test listing a directory with an error while listing."""
+        mock_metadata.return_value = Mock(spec=FolderMetadata)
+        list_error = ListFolderError(tag='other')
+        mock_list.side_effect = dropbox.exceptions.ApiError(
+            1, list_error, 'message', '')
 
         with self.assertRaises(RemoteConnectionError) as e:
             self.fs.listdir('/files')
@@ -611,8 +636,12 @@ class TestDropboxFS(unittest.TestCase):
         self.assertEqual(0, info['size'])
         self.assertEqual('files', info['path'])
 
-    def test_info_root(self):
+    @patch.object(dropbox.Dropbox, 'files_get_metadata')
+    def test_info_root(self, mock_metadata):
         """Test getting info for root directory."""
+        mock_metadata.side_effect = dropbox.exceptions.BadInputError(
+            1, 'The root folder is unsupported')
+
         try:
             info = self.fs.getinfo('/')
         except Exception, e:
@@ -638,6 +667,15 @@ class TestDropboxFS(unittest.TestCase):
             '1', metadata_error, 'message', '')
 
         with self.assertRaises(ResourceNotFoundError) as e:
+            self.fs.getinfo('/files')
+
+    @patch.object(dropbox.Dropbox, 'files_get_metadata')
+    def test_info_folder_bad_input(self, mock_metadata):
+        """Test getting info for a folder with bad input."""
+        mock_metadata.side_effect = dropbox.exceptions.BadInputError(
+            1, 'Bad path')
+
+        with self.assertRaises(dropbox.exceptions.BadInputError) as e:
             self.fs.getinfo('/files')
 
     @patch.object(dropbox.Dropbox, 'files_get_metadata')

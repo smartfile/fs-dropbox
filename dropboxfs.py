@@ -22,6 +22,7 @@ from fs.filelike import StringIO
 from dropbox import Dropbox
 from dropbox import DropboxOAuth2Flow
 from dropbox.exceptions import ApiError
+from dropbox.exceptions import BadInputError
 from dropbox.files import DeletedMetadata
 from dropbox.files import FolderMetadata
 from dropbox.files import WriteMode
@@ -261,11 +262,14 @@ class DropboxClient(Dropbox):
         item = self.cache.get(path) if cache_read else None
         if not item or item.metadata is None or item.expired:
             try:
-                if path is '/' or path is '' or path is '.':
+                metadata = super(DropboxClient, self).files_get_metadata(
+                    path, include_deleted=False)
+            except BadInputError, e:
+                # Root folder is unsupported
+                if 'The root folder is unsupported' in e:
                     metadata = FolderMetadata(name='/', path_display='/')
                 else:
-                    metadata = super(DropboxClient, self).files_get_metadata(
-                        path, include_deleted=False)
+                    raise
             except ApiError, e:
                 if e.error.is_path() and e.error.get_path().is_not_found():
                     raise ResourceNotFoundError(path)
@@ -294,14 +298,21 @@ class DropboxClient(Dropbox):
             update = True
         if update:
             try:
-                # The root folder is unsupported in metadata call
-                if path is '/' or path is '' or path is '.':
+                metadata = super(DropboxClient, self).files_get_metadata(
+                    path, include_deleted=False)
+            except BadInputError, e:
+                # Root folder is unsupported
+                if 'The root folder is unsupported' in e:
                     metadata = FolderMetadata(name='/', path_display='/')
                 else:
-                    metadata = super(DropboxClient, self).files_get_metadata(
-                        path, include_deleted=False)
-                if not isinstance(metadata, FolderMetadata):
-                    raise ResourceInvalidError(path)
+                    raise
+            except ApiError, e:
+                LOGGER.error(e, exc_info=True, extra={'stack': True,})
+                raise RemoteConnectionError(opname='metadata', path=path,
+                                            details=e)
+            if not isinstance(metadata, FolderMetadata):
+                raise ResourceInvalidError(path)
+            try:
                 # Specify the root folder as an empty string rather than as "/"
                 folder_list = super(DropboxClient, self).files_list_folder(
                     path if path is not '/' else '', include_deleted=False)
