@@ -12,6 +12,7 @@ import optparse
 import tempfile
 import logging
 import copy
+import pytz
 from UserDict import UserDict
 
 from fs.base import *
@@ -33,6 +34,8 @@ LOGGER = logging.getLogger(__name__)
 CACHE_TTL = 300
 # Max size for spooling to memory before using disk (5M).
 MAX_BUFFER = 1024 ** 2 * 5
+# Timezone to use for getinfo
+INFO_TIMEZONE = 'America/Indiana/Indianapolis'
 
 
 class ContextManagerStream(object):
@@ -412,11 +415,15 @@ def create_client(token):
 
 def metadata_to_info(metadata, localtime=False):
     isdir = isinstance(metadata, FolderMetadata)
+    modified_time = getattr(metadata, 'server_modified', None)
+    if modified_time:
+        modified_time = modified_time.replace(tzinfo=pytz.utc).astimezone(
+            pytz.timezone(INFO_TIMEZONE))
     info = {
         'size': getattr(metadata, 'size', 0),
         'isdir': isdir,
         'isfile': not isdir,
-        'modified_time': getattr(metadata, 'server_modified', None),
+        'modified_time': modified_time,
         'path': metadata.name,
     }
     return info

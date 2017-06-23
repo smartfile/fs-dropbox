@@ -1,6 +1,7 @@
 """DropboxFS tests."""
 import datetime
 import dropbox
+import pytz
 import random
 import requests
 import six
@@ -37,6 +38,7 @@ from dropboxfs import (
     DropboxCache,
     DropboxClient,
     DropboxFS,
+    INFO_TIMEZONE,
     MAX_BUFFER,
     SpooledWriter,
 )
@@ -623,8 +625,11 @@ class TestDropboxFS(unittest.TestCase):
         self.assertFalse(info['isdir'])
         self.assertTrue(info['isfile'])
         self.assertEqual(
-            datetime.datetime(2017, 6, 19, 16, 24, 12),
+            datetime.datetime(2017, 6, 19, 16, 24, 12, tzinfo=pytz.utc),
             info['modified_time'])
+        self.assertEqual(
+            INFO_TIMEZONE,
+            info['modified_time'].tzinfo.zone)
         self.assertEqual(957694, info['size'])
         self.assertEqual('big-file.pdf', info['path'])
 
