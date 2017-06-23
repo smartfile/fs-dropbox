@@ -483,7 +483,11 @@ class TestDropboxFS(unittest.TestCase):
             Mock(spec=FileMetadata),
             Mock(spec=FolderMetadata),
         ]
-        mock_list.return_value = ListFolderResult(entries=entries)
+        mock_list.side_effect = [
+            dropbox.exceptions.BadInputError(
+                1, 'Specify the root folder as an empty string'),
+            ListFolderResult(entries=entries)
+        ]
         mock_metadata.side_effect = dropbox.exceptions.BadInputError(
             1, 'The root folder is unsupported')
 
@@ -491,6 +495,34 @@ class TestDropboxFS(unittest.TestCase):
 
         self.assertIsInstance(children, list)
         self.assertEqual(2, len(children))
+
+    @patch.object(dropbox.Dropbox, 'files_get_metadata')
+    @patch.object(dropbox.Dropbox, 'files_list_folder')
+    def test_listdir_root_error(self, mock_list, mock_metadata):
+        """Test listing the root directory with an error."""
+        list_error = ListFolderError(tag='other')
+        mock_list.side_effect = [
+            dropbox.exceptions.BadInputError(
+                1, 'Specify the root folder as an empty string'),
+            dropbox.exceptions.ApiError(
+                1, list_error, 'message', '')
+        ]
+        mock_metadata.side_effect = dropbox.exceptions.BadInputError(
+            1, 'The root folder is unsupported')
+
+        with self.assertRaises(RemoteConnectionError) as e:
+            self.fs.listdir('/')
+
+    @patch.object(dropbox.Dropbox, 'files_get_metadata')
+    @patch.object(dropbox.Dropbox, 'files_list_folder')
+    def test_listdir_root_bad_input(self, mock_list, mock_metadata):
+        """Test listing the root directory with bad input."""
+        mock_list.side_effect = dropbox.exceptions.BadInputError(1, 'Bad path')
+        mock_metadata.side_effect = dropbox.exceptions.BadInputError(
+            1, 'The root folder is unsupported')
+
+        with self.assertRaises(dropbox.exceptions.BadInputError) as e:
+            self.fs.listdir('/')
 
     @patch.object(dropbox.Dropbox, 'files_get_metadata')
     def test_listdir_not_dir(self, mock_metadata):

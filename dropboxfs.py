@@ -310,23 +310,36 @@ class DropboxClient(Dropbox):
                 LOGGER.error(e, exc_info=True, extra={'stack': True,})
                 raise RemoteConnectionError(opname='metadata', path=path,
                                             details=e)
+
             if not isinstance(metadata, FolderMetadata):
                 raise ResourceInvalidError(path)
+
             try:
-                # Specify the root folder as an empty string rather than as "/"
                 folder_list = super(DropboxClient, self).files_list_folder(
-                    path if path is not '/' else '', include_deleted=False)
-                children = []
-                for child in folder_list.entries:
-                    if isinstance(child, DeletedMetadata):
-                        continue
-                    children.append(child.name)
-                    self.cache[child.path_display] = CacheItem(child)
-                item = self.cache[path] = CacheItem(metadata, children)
+                    path, include_deleted=False)
+            except BadInputError, e:
+                # Specify the root folder as an empty string rather than as "/"
+                if 'Specify the root folder as an empty string' in e.message:
+                    try:
+                        folder_list = super(DropboxClient, self).files_list_folder(
+                            '', include_deleted=False)
+                    except ApiError, e:
+                        LOGGER.error(e, exc_info=True, extra={'stack': True,})
+                        raise RemoteConnectionError(opname='metadata', path=path,
+                                                    details=e)
+                else:
+                    raise
             except ApiError, e:
                 LOGGER.error(e, exc_info=True, extra={'stack': True,})
                 raise RemoteConnectionError(opname='metadata', path=path,
                                             details=e)
+            children = []
+            for child in folder_list.entries:
+                if isinstance(child, DeletedMetadata):
+                    continue
+                children.append(child.name)
+                self.cache[child.path_display] = CacheItem(child)
+            item = self.cache[path] = CacheItem(metadata, children)
 
         return item.children
 
