@@ -9,10 +9,10 @@ A FS object that integrates with Dropbox.
 import time
 import shutil
 import optparse
-import datetime
 import tempfile
-import calendar
 import logging
+import copy
+import pytz
 from UserDict import UserDict
 
 from fs.base import *
@@ -20,32 +20,28 @@ from fs.path import *
 from fs.errors import *
 from fs.filelike import StringIO
 
-from dropbox import rest
-from dropbox import client
-from dropbox import session
-
+from dropbox import Dropbox
+from dropbox import DropboxOAuth2Flow
+from dropbox.exceptions import ApiError
+from dropbox.exceptions import BadInputError
+from dropbox.files import DeletedMetadata
+from dropbox.files import FolderMetadata
+from dropbox.files import WriteMode
 
 LOGGER = logging.getLogger(__name__)
 
 # Items in cache are considered expired after 5 minutes.
 CACHE_TTL = 300
-# The format Dropbox uses for times.
-TIME_FORMAT = '%a, %d %b %Y %H:%M:%S +0000'
 # Max size for spooling to memory before using disk (5M).
 MAX_BUFFER = 1024 ** 2 * 5
+# Timezone to use for getinfo
+INFO_TIMEZONE = 'America/Indiana/Indianapolis'
 
 
 class ContextManagerStream(object):
     def __init__(self, temp, name):
         self.temp = temp
         self.name = name
-
-    def __iter__(self):
-        while True:
-            data = self.read(16384)
-            if not data:
-                break
-            yield data
 
     def __getattr__(self, name):
         return getattr(self.temp, name)
@@ -90,30 +86,119 @@ class SpooledWriter(ContextManagerStream):
         if hasattr(self.temp, 'flush'):
             self.temp.flush()
         self.temp.seek(0)
-        self.client.put_file(self.name, self, overwrite=True)
+        self.client.files_upload(
+            self.temp.read(),
+            self.name,
+            mode=WriteMode.overwrite)
         self.temp.close()
 
 
-class SpooledReader(ContextManagerStream):
-    """
-    Reads the entire file from the remote server into a buffer or temporary
-    file. It can then satisfy read(), seek() and other calls using the local
-    file.
-    """
-    def __init__(self, client, name, max_buffer=MAX_BUFFER):
+class ChunkedReader(ContextManagerStream):
+    """ A file-like that provides access to a file with dropbox API"""
+    """Reads the file from the remote server as requested.
+    It can then satisfy read()."""
+    def __init__(self, client, name):
         self.client = client
-        r = self.client.get_file(name)
-        self.bytes = int(r.getheader('Content-Length'))
-        if r > max_buffer:
-            temp = tempfile.TemporaryFile()
-        else:
-            temp = StringIO()
-        shutil.copyfileobj(r, temp)
-        temp.seek(0)
-        super(SpooledReader, self).__init__(temp, name)
+        try:
+            _, response = self.client.files_download(name)
+            self.r = response.raw
+        except ApiError, e:
+            LOGGER.error(e, exc_info=True, extra={'stack': True,})
+            raise RemoteConnectionError(opname='get_file', path=name,
+                                        details=e)
+        self.bytes = int(self.r.getheader('Content-Length'))
+        self.name = name
+        self.closed = False
+        self.pos = 0
+        self.seek_pos = 0
+        super(ChunkedReader, self).__init__(self.r, name)
 
     def __len__(self):
         return self.bytes
+
+    def __iter__(self):
+        return self
+
+    def seek(self, offset, whence=0):
+        """
+        Change the stream position to the given byte offset in the file-like
+        object.
+        """
+        if (whence == 0):
+            self.seek_pos = offset
+        elif (whence == 1):
+            self.seek_pos += offset
+        elif (whence == 2):
+            self.seek_pos = self.size + offset
+
+    def tell(self):
+        """ Return the current stream position. """
+        return self.seek_pos
+
+    def next(self):
+        """
+        Read the data until all data is read.
+        data is empty string when there is no more data to read.
+        """
+        data = self.read()
+        if data is None:
+            raise StopIteration()
+        return data
+
+    def read(self, amt=None):
+        """ Read a piece of the file from dropbox. """
+        if not self.r.closed:
+            # Do some fake seeking
+            if self.seek_pos < self.pos:
+                self.r.close()
+                _, response = self.client.files_download(self.name)
+                self.r = response.raw
+                self.r.read(self.seek_pos)
+            elif self.seek_pos > self.pos:
+                # Read ahead enough to reconcile pos and seek_pos
+                self.r.read(self.pos - self.seek_pos)
+            self.pos = self.seek_pos
+
+            # Update position pointers
+            if amt:
+                self.pos += amt
+                self.seek_pos += amt
+            else:
+                self.pos = self.bytes
+                self.seek_pos = self.bytes
+            return self.r.read(amt)
+        else:
+            self.close()
+
+    def readline(self, size=-1):
+        """ Not implemented. Read and return one line from the stream. """
+        raise NotImplementedError()
+
+    def readlines(self, hint=-1):
+        """
+        Not implemented. Read and return a list of lines from the stream.
+        """
+        raise NotImplementedError()
+
+    def writable(self):
+        """ The stream does not support writing. """
+        return False
+
+    def writelines(self, lines):
+        """ Not implemented. Write a list of lines to the stream. """
+        raise NotImplementedError()
+
+    def close(self):
+        """
+        Flush and close this stream. This method has no effect if the file
+        is already closed. As a convenience, it is allowed to call this method
+        more than once; only the first call, however, will have an effect.
+        """
+        # It's a memory leak if self.r not closed.
+        if not self.r.closed:
+            self.r.close()
+        if not self.closed:
+            self.closed = True
 
 
 class CacheItem(object):
@@ -167,8 +252,8 @@ class DropboxCache(UserDict):
         return value
 
 
-class DropboxClient(client.DropboxClient):
-    """A wrapper around the official DropboxClient. This wrapper performs
+class DropboxClient(Dropbox):
+    """A wrapper around the official Dropbox client. This wrapper performs
     caching as well as converting errors to fs exceptions."""
     def __init__(self, *args, **kwargs):
         super(DropboxClient, self).__init__(*args, **kwargs)
@@ -183,31 +268,35 @@ class DropboxClient(client.DropboxClient):
         item = self.cache.get(path) if cache_read else None
         if not item or item.metadata is None or item.expired:
             try:
-                metadata = super(DropboxClient, self).metadata(
-                    path, include_deleted=False, list=False)
-            except rest.ErrorResponse, e:
-                if e.status == 404:
+                metadata = super(DropboxClient, self).files_get_metadata(
+                    path, include_deleted=False)
+            except BadInputError, e:
+                # Root folder is unsupported
+                if 'The root folder is unsupported' in e.message:
+                    metadata = FolderMetadata(name='/', path_display='/')
+                else:
+                    raise
+            except ApiError, e:
+                if e.error.is_path() and e.error.get_path().is_not_found():
                     raise ResourceNotFoundError(path)
                 LOGGER.error(e, exc_info=True, extra={'stack': True,})
                 raise RemoteConnectionError(opname='metadata', path=path,
                                             details=e)
-            if metadata.get('is_deleted', False):
+            if isinstance(metadata, DeletedMetadata):
                 raise ResourceNotFoundError(path)
             item = self.cache[path] = CacheItem(metadata)
         # Copy the info so the caller cannot affect our cache.
-        return dict(item.metadata.items())
+        return copy.deepcopy(item.metadata)
 
     def children(self, path):
         "Gets children of a given path."
-        update, hash = False, None
+        update = False
         item = self.cache.get(path)
         if item:
             if item.expired:
                 update = True
-                if item.metadata and item.children:
-                    hash = item.metadata['hash']
             else:
-                if not item.metadata.get('is_dir'):
+                if not isinstance(item.metadata, FolderMetadata):
                     raise ResourceInvalidError(path)
             if not item.children:
                 update = True
@@ -215,120 +304,128 @@ class DropboxClient(client.DropboxClient):
             update = True
         if update:
             try:
-                metadata = super(DropboxClient, self).metadata(
-                    path, hash=hash, include_deleted=False, list=True)
-                children = []
-                contents = metadata.pop('contents')
-                for child in contents:
-                    if child.get('is_deleted', False):
-                        continue
-                    children.append(basename(child['path']))
-                    self.cache[child['path']] = CacheItem(child)
-                item = self.cache[path] = CacheItem(metadata, children)
-            except rest.ErrorResponse, e:
-                if not item or e.status != 304:
-                    LOGGER.error(e, exc_info=True, extra={'stack': True,})
-                    raise RemoteConnectionError(opname='metadata', path=path,
-                                                details=e)
-                # We have an item from cache (perhaps expired), but it's
-                # hash is still valid (as far as Dropbox is concerned),
-                # so just renew it and keep using it.
-                item.renew()
+                metadata = super(DropboxClient, self).files_get_metadata(
+                    path, include_deleted=False)
+            except BadInputError, e:
+                # Root folder is unsupported
+                if 'The root folder is unsupported' in e.message:
+                    metadata = FolderMetadata(name='/', path_display='/')
+                else:
+                    raise
+            except ApiError, e:
+                LOGGER.error(e, exc_info=True, extra={'stack': True,})
+                raise RemoteConnectionError(opname='metadata', path=path,
+                                            details=e)
+
+            if not isinstance(metadata, FolderMetadata):
+                raise ResourceInvalidError(path)
+
+            try:
+                folder_list = super(DropboxClient, self).files_list_folder(
+                    path, include_deleted=False)
+            except BadInputError, e:
+                # Specify the root folder as an empty string rather than as "/"
+                if 'Specify the root folder as an empty string' in e.message:
+                    try:
+                        folder_list = super(DropboxClient, self).files_list_folder(
+                            '', include_deleted=False)
+                    except ApiError, e:
+                        LOGGER.error(e, exc_info=True, extra={'stack': True,})
+                        raise RemoteConnectionError(opname='metadata', path=path,
+                                                    details=e)
+                else:
+                    raise
+            except ApiError, e:
+                LOGGER.error(e, exc_info=True, extra={'stack': True,})
+                raise RemoteConnectionError(opname='metadata', path=path,
+                                            details=e)
+            children = []
+            for child in folder_list.entries:
+                if isinstance(child, DeletedMetadata):
+                    continue
+                children.append(child.name)
+                self.cache[child.path_display] = CacheItem(child)
+            item = self.cache[path] = CacheItem(metadata, children)
+
         return item.children
 
-    def file_create_folder(self, path):
+    def files_create_folder(self, path):
         "Add newly created directory to cache."
         try:
-            metadata = super(DropboxClient, self).file_create_folder(path)
-        except rest.ErrorResponse, e:
-            if e.status == 404:
-                raise ParentDirectoryMissingError(path)
-            if e.status == 403:
+            metadata = super(DropboxClient, self).files_create_folder(path)
+        except ApiError, e:
+            if e.error.is_path() and e.error.get_path().is_conflict():
                 raise DestinationExistsError(path)
             LOGGER.error(e, exc_info=True, extra={'stack': True,})
             raise RemoteConnectionError(opname='file_create_folder', path=path,
                                         details=e)
         self.cache.set(path, metadata)
 
-    def file_copy(self, src, dst):
+    def files_copy(self, src, dst):
         try:
-            metadata = super(DropboxClient, self).file_copy(src, dst)
-        except rest.ErrorResponse, e:
-            if e.status == 404:
+            metadata = super(DropboxClient, self).files_copy(src, dst)
+        except ApiError, e:
+            if e.error.is_from_lookup() and e.error.get_from_lookup().is_not_found():
                 raise ResourceNotFoundError(src)
-            if e.status == 403:
+            if e.error.is_to() and e.error.get_to().is_conflict():
                 raise DestinationExistsError(dst)
             LOGGER.error(e, exc_info=True, extra={'stack': True,})
-            raise RemoteConnectionError(opname='file_copy', path=path,
+            raise RemoteConnectionError(opname='file_copy', path=src,
                                         details=e)
         self.cache.set(dst, metadata)
 
-    def file_move(self, src, dst):
+    def files_move(self, src, dst):
         try:
-            metadata = super(DropboxClient, self).file_move(src, dst)
-        except rest.ErrorResponse, e:
-            if e.status == 404:
+            metadata = super(DropboxClient, self).files_move(src, dst)
+        except ApiError, e:
+            if e.error.is_from_lookup() and e.error.get_from_lookup().is_not_found():
                 raise ResourceNotFoundError(src)
-            if e.status == 403:
+            if e.error.is_to() and e.error.get_to().is_conflict():
                 raise DestinationExistsError(dst)
             LOGGER.error(e, exc_info=True, extra={'stack': True,})
-            raise RemoteConnectionError(opname='file_move', path=path,
+            raise RemoteConnectionError(opname='file_move', path=src,
                                         details=e)
         self.cache.pop(src, None)
         self.cache.set(dst, metadata)
 
-    def file_delete(self, path):
+    def files_delete(self, path):
         try:
-            super(DropboxClient, self).file_delete(path)
-        except rest.ErrorResponse, e:
-            if e.status == 404:
+            super(DropboxClient, self).files_delete(path)
+        except ApiError, e:
+            if e.error.is_path_lookup() and e.error.get_path_lookup().is_not_found():
                 raise ResourceNotFoundError(path)
-            if e.status == 400 and 'must not be empty' in str(e):
-                raise DirectoryNotEmptyError(path)
-            raise
+            raise RemoteConnectionError(opname='file_delete', path=path,
+                                        details=e)
         self.cache.pop(path, None)
 
-    def put_file(self, path, f, overwrite=False):
+    def files_upload(self, f, path, mode=WriteMode('add', None)):
         try:
-            super(DropboxClient, self).put_file(path, f, overwrite=overwrite)
-        except rest.ErrorResponse, e:
+            super(DropboxClient, self).files_upload(f, path, mode)
+        except ApiError, e:
             LOGGER.error(e, exc_info=True, extra={'stack': True,})
             raise RemoteConnectionError(opname='put_file', path=path,
                                         details=e)
         self.cache.pop(dirname(path), None)
 
 
-def create_client(app_key, app_secret, access_type, token_key, token_secret):
-    """Uses token from create_token() to gain access to the API."""
-    s = session.DropboxSession(app_key, app_secret, access_type)
-    s.set_token(token_key, token_secret)
-    return DropboxClient(s)
+def create_client(token):
+    """Uses token to gain access to the API."""
+    return DropboxClient(token)
 
 
 def metadata_to_info(metadata, localtime=False):
-    isdir = metadata.pop('is_dir', False)
+    isdir = isinstance(metadata, FolderMetadata)
+    modified_time = getattr(metadata, 'server_modified', None)
+    if modified_time:
+        modified_time = modified_time.replace(tzinfo=pytz.utc).astimezone(
+            pytz.timezone(INFO_TIMEZONE))
     info = {
-        'size': metadata.pop('bytes', 0),
+        'size': getattr(metadata, 'size', 0),
         'isdir': isdir,
         'isfile': not isdir,
+        'modified_time': modified_time,
+        'path': metadata.name,
     }
-    try:
-        if 'client_mtime' in metadata:
-            mtime = metadata.get('client_mtime')
-        else:
-            mtime = metadata.get('modified')
-        if mtime:
-            # Parse date/time from Dropbox as struct_time.
-            mtime = time.strptime(mtime, TIME_FORMAT)
-            if localtime:
-                # Convert time to local timezone in seconds.
-                mtime = calendar.timegm(mtime)
-            else:
-                mtime = time.mktime(mtime)
-            # Convert to datetime object, store in modified_time
-            info['modified_time'] = datetime.datetime.fromtimestamp(mtime)
-    except KeyError:
-        pass
     return info
 
 
@@ -346,20 +443,14 @@ class DropboxFS(FS):
              'atomic.rename': True,
              'mime_type': 'virtual/dropbox', }
 
-    def __init__(self, app_key, app_secret, access_type, token_key,
-                 token_secret, localtime=False, thread_synchronize=True):
+    def __init__(self, token, localtime=False, thread_synchronize=True):
         """Create an fs that interacts with Dropbox.
 
-        :param app_key: Your app key assigned by Dropbox.
-        :param app_secret: Your app secret assigned by Dropbox.
-        :param access_type: Type of access requested, 'dropbox' or 'app_folder'.
-        :param token_key: The oAuth key you received after authorization.
-        :param token_secret: The oAuth secret you received after authorization.
+        :param token: The access token you received after authorization.
         :param thread_synchronize: set to True (default) to enable thread-safety
         """
         super(DropboxFS, self).__init__(thread_synchronize=thread_synchronize)
-        self.client = create_client(app_key, app_secret, access_type,
-                                    token_key, token_secret)
+        self.client = create_client(token)
         self.localtime = localtime
 
     def __str__(self):
@@ -368,26 +459,21 @@ class DropboxFS(FS):
     def __unicode__(self):
         return u"<DropboxFS: >"
 
-    def getmeta(self, meta_name, default=NoDefaultMeta):
-        if meta_name == 'read_only':
-            return self.read_only
-        return super(DropboxFS, self).getmeta(meta_name, default)
-
     @synchronize
     def open(self, path, mode="rb", **kwargs):
         if 'r' in mode:
-            return self.client.get_file(path)
+            return ChunkedReader(self.client, path)
         else:
             return SpooledWriter(self.client, path)
 
     @synchronize
     def getcontents(self, path, mode="rb"):
         path = abspath(normpath(path))
-        return self.open(self, path, mode).read()
+        return self.open(path, mode).read()
 
     def setcontents(self, path, data, *args, **kwargs):
         path = abspath(normpath(path))
-        self.client.put_file(path, data, overwrite=True)
+        self.client.files_upload(data, path, mode=WriteMode.overwrite)
 
     def desc(self, path):
         return "%s in Dropbox" % path
@@ -396,7 +482,7 @@ class DropboxFS(FS):
         "Returns a path as the Dropbox API specifies."
         if allow_none:
             return None
-        return client.format_path(abspath(normpath(path)))
+        return abspath(normpath(path))
 
     def isdir(self, path):
         try:
@@ -419,7 +505,7 @@ class DropboxFS(FS):
         except ResourceNotFoundError:
             return False
 
-    def listdir(self, path="/", wildcard=None, full=False, absolute=False,
+    def listdir(self, path='', wildcard=None, full=False, absolute=False,
                 dirs_only=False, files_only=False):
         path = abspath(normpath(path))
         children = self.client.children(path)
@@ -435,47 +521,42 @@ class DropboxFS(FS):
     def copy(self, src, dst, *args, **kwargs):
         src = abspath(normpath(src))
         dst = abspath(normpath(dst))
-        self.client.file_copy(src, dst)
+        self.client.files_copy(src, dst)
 
     def copydir(self, src, dst, *args, **kwargs):
         src = abspath(normpath(src))
         dst = abspath(normpath(dst))
-        self.client.file_copy(src, dst)
+        self.client.files_copy(src, dst)
 
     def move(self, src, dst, *args, **kwargs):
         src = abspath(normpath(src))
         dst = abspath(normpath(dst))
-        self.client.file_move(src, dst)
+        self.client.files_move(src, dst)
 
     def movedir(self, src, dst, *args, **kwargs):
         src = abspath(normpath(src))
         dst = abspath(normpath(dst))
-        self.client.file_move(src, dst)
+        self.client.files_move(src, dst)
 
     def rename(self, src, dst, *args, **kwargs):
         src = abspath(normpath(src))
         dst = abspath(normpath(dst))
-        self.client.file_move(src, dst)
+        self.client.files_move(src, dst)
 
     def makedir(self, path, recursive=False, allow_recreate=False):
         path = abspath(normpath(path))
-        self.client.file_create_folder(path)
-
-    # This does not work, httplib refuses to send a Content-Length: 0 header
-    # even though the header is required. We can't make a 0-length file.
-    #def createfile(self, path, wipe=False):
-    #    self.client.put_file(path, '', overwrite=False)
+        self.client.files_create_folder(path)
 
     def remove(self, path):
         path = abspath(normpath(path))
-        self.client.file_delete(path)
+        self.client.files_delete(path)
 
     def removedir(self, path, *args, **kwargs):
         path = abspath(normpath(path))
-        self.client.file_delete(path)
+        self.client.files_delete(path)
 
 
-def main():
+def main():  # pragma: no cover
     parser = optparse.OptionParser(prog="dropboxfs",
                                    description="CLI harness for DropboxFS.")
     parser.add_option(
@@ -494,12 +575,8 @@ def main():
         help="Your Dropbox app access type.")
     parser.add_option(
         "-a",
-        "--token-key",
+        "--token",
         help="Your access token key (if you previously obtained one.")
-    parser.add_option(
-        "-b",
-        "--token-secret",
-        help="Your access token secret (if you previously obtained one.")
 
     (options, args) = parser.parse_args()
 
@@ -508,35 +585,32 @@ def main():
         parser.error('You must obtain an app key and secret from Dropbox at the following URL.\n\nhttps://www.dropbox.com/developers/apps')
 
     # Instantiate a client one way or another.
-    if not options.token_key and not options.token_secret:
-        s = session.DropboxSession(options.app_key, options.app_secret,
-                                   options.type)
-        # Get a temporary token, so we can make oAuth calls.
-        t = s.obtain_request_token()
+    if not options.token:
+        session = {}
+        dbx = DropboxOAuth2Flow(
+            options.app_key,
+            options.app_secret,
+            'https://goo.gl/',
+            session,
+            'dropbox-auth-csrf-token')
         print "Please visit the following URL and authorize this application.\n"
-        print s.build_authorize_url(t)
-        print "\nWhen you are done, please press <enter>."
+        print dbx.start()
+        print "\nWhen you are done, observe the query parameters from the redirect and press <enter>."
         raw_input()
-        # Trade up to permanent access token.
-        a = s.obtain_access_token(t)
-        token_key, token_secret = a.key, a.secret
+        state = raw_input('Please enter the state from the query parameters: ')
+        code = raw_input('Please enter the code from the query parameters: ')
+        result = dbx.finish({'state': state, 'code': code})
+        token = result.access_token
         print 'Your access token will be printed below, store it for later use.'
-        print 'For future accesses, you can pass the --token-key and --token-secret'
-        print ' arguments.\n'
-        print 'Access token:', a.key
-        print 'Access token secret:', a.secret
+        print 'For future accesses, you can pass the --token argument.\n'
+        print 'Access token:', result.access_token
         print "\nWhen you are done, please press <enter>."
         raw_input()
-    elif not options.token_key or not options.token_secret:
-        parser.error('You must provide both the access token and the '
-                     'access token secret.')
     else:
-        token_key, token_secret = options.token_key, options.token_secret
+        token = options.token
 
-    fs = DropboxFS(options.app_key, options.app_secret, options.type,
-                   token_key, token_secret)
+    fs = DropboxFS(token)
 
-    print fs.getinfo('/')
     print fs.getinfo('/Public')
     if fs.exists('/Bar'):
         fs.removedir('/Bar')
@@ -556,6 +630,7 @@ def main():
     chunk2a = filelike.read(100)
     print chunk2a
     assert chunk2 == chunk2a
+    filelike.close()
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma: no cover
     main()
