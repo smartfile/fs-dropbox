@@ -83,7 +83,10 @@ class SpooledWriter(ContextManagerStream):
         if hasattr(self.temp, 'flush'):
             self.temp.flush()
         self.temp.seek(0)
-        self.client.files_upload(self, self.name, mode=WriteMode.overwrite)
+        self.client.files_upload(
+            self.temp.read(),
+            self.name,
+            mode=WriteMode.overwrite)
         self.temp.close()
 
 

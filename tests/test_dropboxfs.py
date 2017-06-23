@@ -3,6 +3,7 @@ import datetime
 import dropbox
 import random
 import requests
+import six
 import string
 import time
 import traceback
@@ -75,6 +76,9 @@ class TestSpooledWriter(unittest.TestCase):
         self.writer.close()
 
         self.assertEqual(1, self.writer.client.files_upload.call_count)
+        self.assertIsInstance(
+            self.writer.client.files_upload.call_args[0][0],
+            six.binary_type)
 
 class TestChunkedReader(unittest.TestCase):
     """Test ChunkedReader."""
