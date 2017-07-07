@@ -169,6 +169,7 @@ class ChunkedReader(ContextManagerStream):
             return self.r.read(amt)
         else:
             self.close()
+            return ''
 
     def readline(self, size=-1):
         """ Not implemented. Read and return one line from the stream. """
