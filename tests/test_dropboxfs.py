@@ -184,8 +184,9 @@ class TestChunkedReader(unittest.TestCase):
         self.assertEqual(131, self.reader.pos)
 
         self.reader.r.closed = True
-        self.reader.read()
+        data = self.reader.read()
         self.assertTrue(self.reader.closed)
+        self.assertEqual('', data)
 
     def test_readline(self):
         """Test reading a line of the file."""
