@@ -102,7 +102,7 @@ class ChunkedReader(ContextManagerStream):
         try:
             _, response = self.client.files_download(name)
             self.r = response.raw
-        except ApiError, e:
+        except ApiError as e:
             LOGGER.error(e, exc_info=True, extra={'stack': True,})
             raise RemoteConnectionError(opname='get_file', path=name,
                                         details=e)
@@ -135,7 +135,7 @@ class ChunkedReader(ContextManagerStream):
         """ Return the current stream position. """
         return self.seek_pos
 
-    def next(self):
+    def __next__(self):
         """
         Read the data until all data is read.
         data is empty string when there is no more data to read.
@@ -271,13 +271,13 @@ class DropboxClient(Dropbox):
             try:
                 metadata = super(DropboxClient, self).files_get_metadata(
                     path, include_deleted=False)
-            except BadInputError, e:
+            except BadInputError as e:
                 # Root folder is unsupported
                 if 'The root folder is unsupported' in e.message:
                     metadata = FolderMetadata(name='/', path_display='/')
                 else:
                     raise
-            except ApiError, e:
+            except ApiError as e:
                 if e.error.is_path() and e.error.get_path().is_not_found():
                     raise ResourceNotFoundError(path)
                 LOGGER.error(e, exc_info=True, extra={'stack': True,})
@@ -307,13 +307,13 @@ class DropboxClient(Dropbox):
             try:
                 metadata = super(DropboxClient, self).files_get_metadata(
                     path, include_deleted=False)
-            except BadInputError, e:
+            except BadInputError as e:
                 # Root folder is unsupported
                 if 'The root folder is unsupported' in e.message:
                     metadata = FolderMetadata(name='/', path_display='/')
                 else:
                     raise
-            except ApiError, e:
+            except ApiError as e:
                 LOGGER.error(e, exc_info=True, extra={'stack': True,})
                 raise RemoteConnectionError(opname='metadata', path=path,
                                             details=e)
@@ -324,19 +324,19 @@ class DropboxClient(Dropbox):
             try:
                 folder_list = super(DropboxClient, self).files_list_folder(
                     path, include_deleted=False)
-            except BadInputError, e:
+            except BadInputError as e:
                 # Specify the root folder as an empty string rather than as "/"
                 if 'Specify the root folder as an empty string' in e.message:
                     try:
                         folder_list = super(DropboxClient, self).files_list_folder(
                             '', include_deleted=False)
-                    except ApiError, e:
+                    except ApiError as e:
                         LOGGER.error(e, exc_info=True, extra={'stack': True,})
                         raise RemoteConnectionError(opname='metadata', path=path,
                                                     details=e)
                 else:
                     raise
-            except ApiError, e:
+            except ApiError as e:
                 LOGGER.error(e, exc_info=True, extra={'stack': True,})
                 raise RemoteConnectionError(opname='metadata', path=path,
                                             details=e)
@@ -354,7 +354,7 @@ class DropboxClient(Dropbox):
         "Add newly created directory to cache."
         try:
             metadata = super(DropboxClient, self).files_create_folder(path)
-        except ApiError, e:
+        except ApiError as e:
             if e.error.is_path() and e.error.get_path().is_conflict():
                 raise DestinationExistsError(path)
             LOGGER.error(e, exc_info=True, extra={'stack': True,})
@@ -365,7 +365,7 @@ class DropboxClient(Dropbox):
     def files_copy(self, src, dst):
         try:
             metadata = super(DropboxClient, self).files_copy(src, dst)
-        except ApiError, e:
+        except ApiError as e:
             if e.error.is_from_lookup() and e.error.get_from_lookup().is_not_found():
                 raise ResourceNotFoundError(src)
             if e.error.is_to() and e.error.get_to().is_conflict():
@@ -378,7 +378,7 @@ class DropboxClient(Dropbox):
     def files_move(self, src, dst):
         try:
             metadata = super(DropboxClient, self).files_move(src, dst)
-        except ApiError, e:
+        except ApiError as e:
             if e.error.is_from_lookup() and e.error.get_from_lookup().is_not_found():
                 raise ResourceNotFoundError(src)
             if e.error.is_to() and e.error.get_to().is_conflict():
@@ -392,7 +392,7 @@ class DropboxClient(Dropbox):
     def files_delete(self, path):
         try:
             super(DropboxClient, self).files_delete(path)
-        except ApiError, e:
+        except ApiError as e:
             if e.error.is_path_lookup() and e.error.get_path_lookup().is_not_found():
                 raise ResourceNotFoundError(path)
             raise RemoteConnectionError(opname='file_delete', path=path,
@@ -402,7 +402,7 @@ class DropboxClient(Dropbox):
     def files_upload(self, f, path, mode=WriteMode('add', None)):
         try:
             super(DropboxClient, self).files_upload(f, path, mode)
-        except ApiError, e:
+        except ApiError as e:
             LOGGER.error(e, exc_info=True, extra={'stack': True,})
             raise RemoteConnectionError(opname='put_file', path=path,
                                         details=e)
@@ -458,7 +458,7 @@ class DropboxFS(FS):
         return "<DropboxFS: >"
 
     def __unicode__(self):
-        return u"<DropboxFS: >"
+        return "<DropboxFS: >"
 
     @synchronize
     def open(self, path, mode="rb", **kwargs):
@@ -594,42 +594,42 @@ def main():  # pragma: no cover
             'https://goo.gl/',
             session,
             'dropbox-auth-csrf-token')
-        print "Please visit the following URL and authorize this application.\n"
-        print dbx.start()
-        print "\nWhen you are done, observe the query parameters from the redirect and press <enter>."
-        raw_input()
-        state = raw_input('Please enter the state from the query parameters: ')
-        code = raw_input('Please enter the code from the query parameters: ')
+        print("Please visit the following URL and authorize this application.\n")
+        print(dbx.start())
+        print("\nWhen you are done, observe the query parameters from the redirect and press <enter>.")
+        input()
+        state = input('Please enter the state from the query parameters: ')
+        code = input('Please enter the code from the query parameters: ')
         result = dbx.finish({'state': state, 'code': code})
         token = result.access_token
-        print 'Your access token will be printed below, store it for later use.'
-        print 'For future accesses, you can pass the --token argument.\n'
-        print 'Access token:', result.access_token
-        print "\nWhen you are done, please press <enter>."
-        raw_input()
+        print('Your access token will be printed below, store it for later use.')
+        print('For future accesses, you can pass the --token argument.\n')
+        print('Access token:', result.access_token)
+        print("\nWhen you are done, please press <enter>.")
+        input()
     else:
         token = options.token
 
     fs = DropboxFS(token)
 
-    print fs.getinfo('/Public')
+    print(fs.getinfo('/Public'))
     if fs.exists('/Bar'):
         fs.removedir('/Bar')
-    print fs.listdir('/')
+    print(fs.listdir('/'))
     fs.makedir('/Bar')
-    print fs.listdir('/')
-    print fs.listdir('/Foo')
+    print(fs.listdir('/'))
+    print(fs.listdir('/Foo'))
 
     filelike = fs.open('/big-file.pdf')
-    print filelike.read(100)
+    print(filelike.read(100))
     filelike.seek(100)
     chunk2 = filelike.read(100)
-    print chunk2
+    print(chunk2)
     filelike.seek(200)
-    print filelike.read(100)
+    print(filelike.read(100))
     filelike.seek(100)
     chunk2a = filelike.read(100)
-    print chunk2a
+    print(chunk2a)
     assert chunk2 == chunk2a
     filelike.close()
 

@@ -147,9 +147,9 @@ class TestChunkedReader(unittest.TestCase):
         """Test getting the next piece of data."""
         mock_read.side_effect = ['123', None]
 
-        self.assertEqual('123', self.reader.next())
+        self.assertEqual('123', next(self.reader))
         with self.assertRaises(StopIteration) as e:
-            self.reader.next()
+            next(self.reader)
 
     def test_read(self):
         """Test reading data from the file."""
@@ -286,7 +286,7 @@ class TestDropboxFS(unittest.TestCase):
 
     def test_unicode_str(self):
         """Test unicode __str__ method."""
-        self.assertEqual(u'<DropboxFS: >', unicode(self.fs))
+        self.assertEqual('<DropboxFS: >', str(self.fs))
 
     def test_getmeta(self):
         """Test get meta."""
@@ -327,7 +327,7 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             self.fs.setcontents('/file.txt', '123')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
     @patch.object(dropbox.Dropbox, 'files_upload')
@@ -535,20 +535,20 @@ class TestDropboxFS(unittest.TestCase):
     def test_listdir_not_dir(self, mock_metadata):
         """Test listing something not a directory."""
         metadata = FileMetadata(
-            name=u'big-file.pdf',
-            id=u'id:QsjEAx6f1gAAAAAAAAAAMQ',
+            name='big-file.pdf',
+            id='id:QsjEAx6f1gAAAAAAAAAAMQ',
             client_modified=datetime.datetime(2017, 3, 6, 15, 44, 28),
             server_modified=datetime.datetime(2017, 6, 19, 16, 24, 12),
-            rev=u'6854fd53c4',
+            rev='6854fd53c4',
             size=957694,
-            path_lower=u'/big-file.pdf',
-            path_display=u'/big-file.pdf',
+            path_lower='/big-file.pdf',
+            path_display='/big-file.pdf',
             parent_shared_folder_id=None,
             media_info=None,
             sharing_info=None,
             property_groups=None,
             has_explicit_shared_members=None,
-            content_hash=u'9e9b314b4df30cf733a6d35a7a8b3aa853eee3b7e78d056b2c2b4d460a331eff'
+            content_hash='9e9b314b4df30cf733a6d35a7a8b3aa853eee3b7e78d056b2c2b4d460a331eff'
         )
         mock_metadata.side_effect = [Mock(FileMetadata), metadata]
 
@@ -596,26 +596,26 @@ class TestDropboxFS(unittest.TestCase):
     def test_info_file(self, mock_metadata):
         """Test getting info for a file."""
         metadata = FileMetadata(
-            name=u'big-file.pdf',
-            id=u'id:QsjEAx6f1gAAAAAAAAAAMQ',
+            name='big-file.pdf',
+            id='id:QsjEAx6f1gAAAAAAAAAAMQ',
             client_modified=datetime.datetime(2017, 3, 6, 15, 44, 28),
             server_modified=datetime.datetime(2017, 6, 19, 16, 24, 12),
-            rev=u'6854fd53c4',
+            rev='6854fd53c4',
             size=957694,
-            path_lower=u'/big-file.pdf',
-            path_display=u'/big-file.pdf',
+            path_lower='/big-file.pdf',
+            path_display='/big-file.pdf',
             parent_shared_folder_id=None,
             media_info=None,
             sharing_info=None,
             property_groups=None,
             has_explicit_shared_members=None,
-            content_hash=u'9e9b314b4df30cf733a6d35a7a8b3aa853eee3b7e78d056b2c2b4d460a331eff'
+            content_hash='9e9b314b4df30cf733a6d35a7a8b3aa853eee3b7e78d056b2c2b4d460a331eff'
         )
         mock_metadata.return_value = metadata
 
         try:
             info = self.fs.getinfo('/big-file.pdf')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
         self.assertIn('isdir', info)
@@ -638,9 +638,9 @@ class TestDropboxFS(unittest.TestCase):
     def test_info_file_deleted(self, mock_metadata):
         """Test getting info for a file when it was deleted."""
         mock_metadata.return_value = DeletedMetadata(
-            name=u'big-file.pdf',
-            path_lower=u'/big-file.pdf',
-            path_display=u'/big-file.pdf',
+            name='big-file.pdf',
+            path_lower='/big-file.pdf',
+            path_display='/big-file.pdf',
             parent_shared_folder_id=None,
         )
 
@@ -651,10 +651,10 @@ class TestDropboxFS(unittest.TestCase):
     def test_info_folder(self, mock_metadata):
         """Test getting info for a folder."""
         metadata = FolderMetadata(
-            name=u'files',
-            id=u'id:QsjEAx6f1gAAAAAAAAAAMQ',
-            path_lower=u'/files',
-            path_display=u'/files',
+            name='files',
+            id='id:QsjEAx6f1gAAAAAAAAAAMQ',
+            path_lower='/files',
+            path_display='/files',
             parent_shared_folder_id=None,
             shared_folder_id=None,
             sharing_info=None,
@@ -664,7 +664,7 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             info = self.fs.getinfo('/files')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
         self.assertIn('isdir', info)
@@ -686,7 +686,7 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             info = self.fs.getinfo('/')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
         self.assertIn('isdir', info)
@@ -738,7 +738,7 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             self.fs.copy('/file1.txt', '/file2.txt')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
     @patch.object(dropbox.Dropbox, 'files_copy')
@@ -785,7 +785,7 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             self.fs.copydir('/files', '/files2')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
     @patch.object(dropbox.Dropbox, 'files_move')
@@ -795,7 +795,7 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             self.fs.move('/file1.txt', '/file2.txt')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
     @patch.object(dropbox.Dropbox, 'files_move')
@@ -805,7 +805,7 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             self.fs.movedir('/files', '/files2')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
     @patch.object(dropbox.Dropbox, 'files_move')
@@ -815,7 +815,7 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             self.fs.rename('/file1.txt', '/file2.txt')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
     @patch.object(dropbox.Dropbox, 'files_move')
@@ -862,7 +862,7 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             self.fs.makedir('/files')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
     @patch.object(dropbox.Dropbox, 'files_create_folder')
@@ -895,7 +895,7 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             self.fs.remove('/file.txt')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
 
     @patch.object(dropbox.Dropbox, 'files_delete')
@@ -927,5 +927,5 @@ class TestDropboxFS(unittest.TestCase):
 
         try:
             self.fs.removedir('/files')
-        except Exception, e:
+        except Exception as e:
             self.fail(e)
