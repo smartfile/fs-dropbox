@@ -13,7 +13,7 @@ import tempfile
 import logging
 import copy
 import pytz
-from UserDict import UserDict
+from collections import UserDict
 
 from fs.base import *
 from fs.path import *
